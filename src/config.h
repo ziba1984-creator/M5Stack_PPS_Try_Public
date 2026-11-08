@@ -1,0 +1,73 @@
+#pragma once
+
+// Wi-Fi credentials (AP_SSID / AP_PASS / STA_SSID / STA_PASS) live in secrets.h,
+// which is git-ignored. Copy secrets.example.h to secrets.h and set your own values.
+#if __has_include("secrets.h")
+#include "secrets.h"
+#else
+#warning "src/secrets.h not found: using the placeholder credentials from secrets.example.h"
+#include "secrets.example.h"
+#endif
+#define STA_RETRY_MS 15000
+
+// PPS limits (clamped in pps_ctrl)
+#define PPS_I2C_FREQ   100000U  // 100 kHz for noise margin (fan motor on the same bus)
+#define PPS_V_MIN      0.5f
+#define PPS_V_MAX      30.0f
+#define PPS_I_MIN      0.0f
+#define PPS_I_MAX      5.0f
+#define PPS_V_DEFAULT  0.5f
+#define PPS_I_DEFAULT  1.0f
+#define PPS_POLL_MS    200
+#define PPS_STALE_MS   1000  // no good status read for this long: show STALE / FORCE OFF
+#define PPS_LOST_MS    3000  // no good status read for this long: reconnect (output restarts OFF)
+#define PPS_OFF_RETRIES 3    // output-OFF write+read-back attempts
+#define PPS_CMD_TIMEOUT_MS 1000  // how long /api/set waits for the PPS task's result
+
+// Temperature bands (PPS module temperature, deg C), shared by fan and LEDs
+#define TEMP_WARM      40.0f  // LED yellow
+#define TEMP_HOT       45.0f  // LED red
+#define TEMP_CRITICAL  50.0f  // LED red blinking
+
+// Fan Module v1.1: off below FAN_T_ON (stays on down to FAN_T_OFF), FAN_DUTY_MIN..100 % up to FAN_T_FULL
+#define FAN_I2C_FREQ     100000U
+#define FAN_T_ON         40.0f
+#define FAN_T_OFF        38.0f
+#define FAN_T_FULL       50.0f  // = TEMP_CRITICAL
+#define FAN_DUTY_MIN     30
+#define FAN_DUTY_UNKNOWN 50     // while the PPS temperature read is stale
+#define FAN_PROBE_MS     5000   // retry interval when the fan module is not found
+#define FAN_REFRESH_MS   10000  // rewrite the duty even if unchanged
+
+// M5GO Bottom3 RGB LEDs (10 x WS2812, 5 per side)
+// LED_PIN: G5 = M-Bus pin 8 (verified on hardware). Never G35: that is the LCD D/C line.
+#define LED_PIN        5
+#define LED_COUNT      10
+#define LED_PER_SIDE   5
+#define LED_BRIGHTNESS 40      // 0-255; keep low to save battery
+#define LED_T_LOW      25.0f   // 1 LED lit at or below this temperature
+#define LED_T_HIGH     50.0f   // all 5 lit at or above this temperature
+#define THERMAL_PERIOD_MS 500  // also the LED blink half-period
+
+// Tasks: name, stack(bytes), priority, core
+#define TASK_PPS_STACK     4096
+#define TASK_PPS_PRIO      3
+#define TASK_PPS_CORE      1
+#define TASK_UI_STACK      8192
+#define TASK_UI_PRIO       2
+#define TASK_UI_CORE       1
+#define TASK_TOUCH_STACK   4096
+#define TASK_TOUCH_PRIO    3
+#define TASK_TOUCH_CORE    1
+#define TASK_BATT_STACK    3072
+#define TASK_BATT_PRIO     1
+#define TASK_BATT_CORE     1
+#define TASK_WIFI_STACK    4096
+#define TASK_WIFI_PRIO     1
+#define TASK_WIFI_CORE     0
+#define TASK_WEB_STACK     8192
+#define TASK_WEB_PRIO      1
+#define TASK_WEB_CORE      0
+#define TASK_THERMAL_STACK 4096
+#define TASK_THERMAL_PRIO  1
+#define TASK_THERMAL_CORE  1
