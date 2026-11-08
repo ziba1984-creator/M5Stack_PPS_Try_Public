@@ -8,10 +8,17 @@ struct PpsStatus {
     // false while the latest status read failed: the fields below are the last
     // fully-read snapshot and may be stale. enabled must not be trusted then.
     bool valid     = false;
-    // Set when the link was lost (or a shutdown could not confirm OFF): the output
-    // may still be ON. Cleared only once output OFF is confirmed by read-back.
-    // Distinguishes "communication lost" from "no PPS since boot".
-    bool outputUnknown = false;
+    // A command changed the output/setpoints and the next full status read has not
+    // confirmed it yet (normally < PPS_POLL_MS). The snapshot is not trusted for the
+    // power toggle (UI sends OFF only), but temperature is still fresh enough for the
+    // fan/LEDs and further commands are accepted.
+    bool verifying = false;
+    // The output may be ON but this cannot be confirmed: at boot until the first
+    // read-back, after a link loss, after a failed ON write / OFF confirmation, or
+    // after a shutdown that could not confirm OFF. Cleared by a confirmed OFF
+    // (connect) or a successful full status read. Starts true: the PPS has its own
+    // supply, so a CoreS3-only reboot can leave its output ON.
+    bool outputUnknown = true;
     bool halted        = false;  // systemFatal ran: no further commands are applied
     bool enabled   = false;
     uint8_t mode   = 0;  // <=1: CV, otherwise CC

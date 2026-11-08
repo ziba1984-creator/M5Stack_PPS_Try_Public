@@ -102,7 +102,11 @@ void draw(const PpsStatus& p, const BatteryStatus& b, const NetStatus& n) {
     const int step = stepIdx;
     snprintf(buf, sizeof(buf), "%.2g/%.2g", V_STEPS[step], I_STEPS[step]);
     drawButton(BTN_STEP, buf, DARKGREY);
-    if (!p.valid) {
+    if (!p.valid && p.verifying) {
+        // A command was just applied and is being confirmed (normally < 200 ms).
+        // The button still only sends OFF (see handleTouch): emergency OFF wins.
+        drawButton(BTN_POWER, "CHECKING", DARKGREY);
+    } else if (!p.valid) {
         // Output state unknown: the button only forces OFF (see handleTouch).
         drawButton(BTN_POWER, "FORCE OFF", ORANGE);
         canvas.setTextDatum(top_center);

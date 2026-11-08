@@ -36,7 +36,7 @@ static void showLeds(const PpsStatus& p, bool blinkOn) {
     } else if (!p.connected && !p.outputUnknown) {
         color = s_leds.Color(0, 0, 255);  // one blue LED: LEDs alive, PPS not found
         lit   = 1;
-    } else if (!p.connected || !p.valid) {
+    } else if (!p.connected || !(p.valid || p.verifying)) {
         // orange blink: link lost (output may be ON) or temperature stale
         color = blinkOn ? s_leds.Color(255, 96, 0) : 0;  // orange blink: temperature unknown
         lit   = LED_PER_SIDE;
@@ -88,7 +88,7 @@ static void thermalTask(void*) {
         // The fan stops only when the output is known to be OFF (or no PPS was ever seen).
         if (p.halted) duty = p.outputUnknown ? 100 : 0;      // fatal: full speed unless OFF confirmed
         else if (!p.connected) duty = p.outputUnknown ? FAN_DUTY_UNKNOWN : 0;  // lost vs. absent
-        else if (!p.valid) duty = FAN_DUTY_UNKNOWN;          // temperature unknown: fail safe
+        else if (!(p.valid || p.verifying)) duty = FAN_DUTY_UNKNOWN;  // temperature unknown: fail safe
         else duty = fanDutyFor(p.temp, lastDuty > 0);
 
         const uint32_t now = millis();

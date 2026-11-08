@@ -91,19 +91,53 @@ static bool addSetpoint(uint8_t reg, float delta, float lo, float hi) {
     return writeF32(reg, clampf(roundf((cur + delta) * 100.0f) / 100.0f, lo, hi));
 }
 
-// statusValid: the PPS task's view of whether the current status is trustworthy.
-// While it is not, only output OFF is executed (same rule as the UI's FORCE OFF);
-// checking here, at execution time, avoids races with a pre-check in the caller.
-static PpsResult applySet(const PpsCmd& c, bool statusValid) {
+// The status is trusted for accepting commands if the last full read is valid, or if
+// it was valid until our own successful command (verifying). A stale status (link
+// trouble) only allows output OFF, same rule as the UI's FORCE OFF; checking here,
+// at execution time, avoids races with a pre-check in the caller.
+static bool trusted(const PpsStatus& st) {
+    return st.valid || st.verifying;
+}
+
+// Commands update the PPS task's own snapshot `st` so the published state never shows
+// the pre-command values as valid:
+//   - confirmed OFF            -> enabled=false immediately
+//   - state-changing write ok  -> valid=false, verifying=true (until the next full read)
+//   - write failed             -> valid=false (stale until the next good read);
+//                                 a failed ON / OFF also sets outputUnknown (lost ACK)
+static void markFailed(PpsStatus& st, bool outputMayBeOn) {
+    st.valid     = false;
+    st.verifying = false;
+    if (outputMayBeOn) st.outputUnknown = true;
+}
+
+static PpsResult applySet(const PpsCmd& c, PpsStatus& st) {
     // OFF first, so a failing setpoint write can never delay or skip it.
-    if (c.hasEn && !c.en && !outputOff()) return PPS_ERR_I2C;
+    if (c.hasEn && !c.en) {
+        if (!outputOff()) {
+            markFailed(st, true);
+            return PPS_ERR_I2C;
+        }
+        st.enabled = false;  // confirmed by read-back
+    }
     const bool more = c.hasV || c.hasI || (c.hasEn && c.en);
     if (!more) return PPS_OK;
-    if (!statusValid) return PPS_ERR_STALE;
-    if (c.hasV && !writeF32(REG_VOUT_SET, clampf(c.v, PPS_V_MIN, PPS_V_MAX))) return PPS_ERR_I2C;
-    if (c.hasI && !writeF32(REG_IOUT_SET, clampf(c.i, PPS_I_MIN, PPS_I_MAX))) return PPS_ERR_I2C;
+    if (!trusted(st)) return PPS_ERR_STALE;
+    st.valid     = false;
+    st.verifying = true;
+    if (c.hasV && !writeF32(REG_VOUT_SET, clampf(c.v, PPS_V_MIN, PPS_V_MAX))) {
+        markFailed(st, false);
+        return PPS_ERR_I2C;
+    }
+    if (c.hasI && !writeF32(REG_IOUT_SET, clampf(c.i, PPS_I_MIN, PPS_I_MAX))) {
+        markFailed(st, false);
+        return PPS_ERR_I2C;
+    }
     // ON last, and only after every setpoint in this command was written.
-    if (c.hasEn && c.en && !writeU8(REG_ENABLE, 1)) return PPS_ERR_I2C;
+    if (c.hasEn && c.en && !writeU8(REG_ENABLE, 1)) {
+        markFailed(st, true);  // the write may have landed even though the ACK was lost
+        return PPS_ERR_I2C;
+    }
     return PPS_OK;
 }
 
@@ -113,17 +147,24 @@ static std::atomic<bool> s_halted{false};
 static std::atomic<bool> s_shutdownDone{false};
 static std::atomic<bool> s_offConfirmed{false};
 
-static PpsResult applyCmd(const PpsCmd& c, bool statusValid) {
+static PpsResult applyAdd(uint8_t reg, float delta, float lo, float hi, PpsStatus& st) {
+    if (!trusted(st)) return PPS_ERR_STALE;
+    st.valid     = false;
+    st.verifying = true;
+    if (!addSetpoint(reg, delta, lo, hi)) {
+        markFailed(st, false);
+        return PPS_ERR_I2C;
+    }
+    return PPS_OK;
+}
+
+static PpsResult applyCmd(const PpsCmd& c, PpsStatus& st) {
     I2cLock lock;
     if (s_halted) return PPS_ERR_DISCONNECTED;
     switch (c.type) {
-        case CMD_SET: return applySet(c, statusValid);
-        case CMD_ADD_V:
-            if (!statusValid) return PPS_ERR_STALE;
-            return addSetpoint(REG_VOUT_SET, c.v, PPS_V_MIN, PPS_V_MAX) ? PPS_OK : PPS_ERR_I2C;
-        case CMD_ADD_I:
-            if (!statusValid) return PPS_ERR_STALE;
-            return addSetpoint(REG_IOUT_SET, c.i, PPS_I_MIN, PPS_I_MAX) ? PPS_OK : PPS_ERR_I2C;
+        case CMD_SET: return applySet(c, st);
+        case CMD_ADD_V: return applyAdd(REG_VOUT_SET, c.v, PPS_V_MIN, PPS_V_MAX, st);
+        case CMD_ADD_I: return applyAdd(REG_IOUT_SET, c.i, PPS_I_MIN, PPS_I_MAX, st);
     }
     return PPS_ERR_I2C;
 }
@@ -139,8 +180,8 @@ static bool plausible(const PpsStatus& r, const PpsStatus& prev) {
     }
     // The temperature drives the fan: a sudden jump between consecutive valid reads
     // is far more likely a corrupted transfer than physics. After a stale period
-    // (prev.valid == false) a new baseline is accepted.
-    if (prev.valid && fabsf(r.temp - prev.temp) > PPS_TEMP_MAX_STEP) return false;
+    // (not trusted any more) a new baseline is accepted.
+    if (trusted(prev) && fabsf(r.temp - prev.temp) > PPS_TEMP_MAX_STEP) return false;
     return true;
 }
 
@@ -168,8 +209,10 @@ static bool readStatus(PpsStatus& s) {
                       r.vin, r.vout, r.iout, r.temp, r.vset, r.iset);
         return false;
     }
-    r.enabled = en != 0;
-    r.valid   = true;
+    r.enabled       = en != 0;
+    r.valid         = true;
+    r.verifying     = false;
+    r.outputUnknown = false;  // the output state was just read
     s = r;
     return true;
 }
@@ -216,7 +259,8 @@ static void ppsTask(void*) {
         for (;;) {
             const TickType_t now = xTaskGetTickCount();
             if ((int32_t)(deadline - now) <= 0 || !ppsWaitCmd(cmd, deadline - now)) break;
-            const PpsResult r = applyCmd(cmd, st.valid);
+            const PpsResult r = applyCmd(cmd, st);
+            stateSetPps(st);  // publish verifying/stale/OFF right away, before the next read
             if (cmd.id) ppsPostReply(cmd.id, r);
             if (r != PPS_OK) Serial.printf("PPS: command type %u not applied (result %u)\n", cmd.type, r);
         }
@@ -235,7 +279,10 @@ static void ppsTask(void*) {
         } else {
             const uint32_t sinceMs = (xTaskGetTickCount() - lastGoodRead) * portTICK_PERIOD_MS;
             Serial.printf("PPS: status read failed (%lu ms since last good read)\n", (unsigned long)sinceMs);
-            if (sinceMs >= PPS_STALE_MS) st.valid = false;
+            if (sinceMs >= PPS_STALE_MS) {
+                st.valid     = false;
+                st.verifying = false;  // a pending verification that never completed is just stale
+            }
             if (sinceMs >= PPS_LOST_MS) {
                 Serial.println("PPS: no response, reconnecting (output state unknown until OFF is confirmed)");
                 st.connected     = false;
