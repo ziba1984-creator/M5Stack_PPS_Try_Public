@@ -3,6 +3,7 @@
 #include "app_state.h"
 #include "config.h"
 #include "fatal.h"
+#include "fault_inject.h"
 
 namespace {
 
@@ -64,7 +65,11 @@ void draw(const PpsStatus& p, const BatteryStatus& b, const NetStatus& n) {
     if (!p.connected) {
         canvas.setTextDatum(middle_center);
         canvas.setTextColor(RED, BLACK);
-        canvas.drawString("PPS not found", 160, 100, &fonts::Font4);
+        canvas.drawString(p.halted ? "PPS halted" : "PPS not found", 160, 100, &fonts::Font4);
+        if (p.outputUnknown) {
+            canvas.setTextColor(ORANGE, BLACK);
+            canvas.drawString("Output state UNKNOWN", 160, 135, &fonts::Font4);
+        }
         canvas.pushSprite(0, 0);
         return;
     }
@@ -166,6 +171,8 @@ void uiTask(void*) {
         systemFatal("UI: touch task creation failed");
     }
     for (;;) {
+        // Test builds only: run the fatal path from the UI task, as a real UI failure would.
+        if (faultFatalRequested()) systemFatal("fault injection test");
         draw(stateGetPps(), stateGetBattery(), stateGetNet());
         ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(100));
     }

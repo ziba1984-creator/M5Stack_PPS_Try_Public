@@ -8,6 +8,11 @@ struct PpsStatus {
     // false while the latest status read failed: the fields below are the last
     // fully-read snapshot and may be stale. enabled must not be trusted then.
     bool valid     = false;
+    // Set when the link was lost (or a shutdown could not confirm OFF): the output
+    // may still be ON. Cleared only once output OFF is confirmed by read-back.
+    // Distinguishes "communication lost" from "no PPS since boot".
+    bool outputUnknown = false;
+    bool halted        = false;  // systemFatal ran: no further commands are applied
     bool enabled   = false;
     uint8_t mode   = 0;  // <=1: CV, otherwise CC
     float vin = 0, vout = 0, iout = 0, temp = 0;
@@ -43,6 +48,7 @@ enum PpsResult : uint8_t {
     PPS_OK,
     PPS_ERR_I2C,           // a write or the OFF read-back failed; device state may be partial
     PPS_ERR_DISCONNECTED,  // dropped because the PPS was (re)connecting; nothing was applied
+    PPS_ERR_STALE,         // status is stale: only output OFF is allowed (OFF, if requested, was applied)
 };
 
 struct PpsCmd {
@@ -70,9 +76,10 @@ void stateSetNet(const NetStatus& s);
 bool ppsPostCmd(const PpsCmd& c, TickType_t timeout = 0);
 bool ppsWaitCmd(PpsCmd& out, TickType_t timeout);
 
-// Completion reporting for commands with a non-zero id. The reply slot holds only the
-// latest reply, so a single waiter (the web task) is assumed; replies for ids nobody
-// waits for anymore (timed-out requests) are simply discarded.
+// Completion reporting for commands with a non-zero id. Replies are kept in FIFO order
+// (deeper than the command queue), so a late reply for a timed-out request can never
+// overwrite the one being waited for; the waiter skips replies with other ids.
+// A single waiter (the web task) is assumed.
 uint32_t ppsNextCmdId();
 void ppsPostReply(uint32_t id, PpsResult r);
 bool ppsWaitReply(uint32_t id, PpsResult& out, TickType_t timeout);

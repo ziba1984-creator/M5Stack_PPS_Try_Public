@@ -2,11 +2,16 @@
 
 // Wi-Fi credentials (AP_SSID / AP_PASS / STA_SSID / STA_PASS) live in secrets.h,
 // which is git-ignored. Copy secrets.example.h to secrets.h and set your own values.
+// Without secrets.h the build fails, so firmware with the published placeholder
+// credentials cannot be flashed by accident. CI build checks define
+// ALLOW_PLACEHOLDER_SECRETS explicitly to compile against the template.
 #if __has_include("secrets.h")
 #include "secrets.h"
-#else
-#warning "src/secrets.h not found: using the placeholder credentials from secrets.example.h"
+#elif defined(ALLOW_PLACEHOLDER_SECRETS)
+#warning "ALLOW_PLACEHOLDER_SECRETS: building with placeholder credentials - do not flash this firmware"
 #include "secrets.example.h"
+#else
+#error "src/secrets.h not found: copy src/secrets.example.h to src/secrets.h and set your own Wi-Fi credentials"
 #endif
 #define STA_RETRY_MS 15000
 
@@ -23,6 +28,17 @@
 #define PPS_LOST_MS    3000  // no good status read for this long: reconnect (output restarts OFF)
 #define PPS_OFF_RETRIES 3    // output-OFF write+read-back attempts
 #define PPS_CMD_TIMEOUT_MS 1000  // how long /api/set waits for the PPS task's result
+#define PPS_CMD_QUEUE_LEN   8
+#define PPS_REPLY_QUEUE_LEN 16   // > command queue, so pending replies are never overwritten
+
+// Plausibility limits for values read back over I2C (no checksum on the bus).
+// A read outside these is treated as a failed read (-> retry / STALE).
+#define PPS_SETPOINT_TOL   0.05f   // allowed overshoot of vset/iset beyond PPS_*_MIN/MAX
+#define PPS_VIN_PLAUSIBLE  40.0f   // |vin| and |vout| above this are rejected
+#define PPS_IOUT_PLAUSIBLE 6.0f    // |iout| above this is rejected
+#define PPS_TEMP_MIN_PLAUSIBLE (-20.0f)
+#define PPS_TEMP_MAX_PLAUSIBLE 125.0f
+#define PPS_TEMP_MAX_STEP  10.0f   // larger jump between consecutive valid reads is rejected
 
 // Temperature bands (PPS module temperature, deg C), shared by fan and LEDs
 #define TEMP_WARM      40.0f  // LED yellow

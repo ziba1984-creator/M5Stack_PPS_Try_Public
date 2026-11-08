@@ -42,7 +42,9 @@ async function send(k,val){
 async function poll(){
   try{
     const s=await (await fetch('/api/status')).json();
-    $('en').textContent=!s.connected?'PPS not found':(!s.valid?'UNKNOWN (stale)':(s.enabled?'ON':'OFF'));
+    $('en').textContent=s.halted?(s.output_unknown?'HALTED (OFF NOT confirmed)':'HALTED (OFF)'):
+      !s.connected?(s.output_unknown?'PPS lost (output UNKNOWN)':'PPS not found'):
+      (!s.valid?'UNKNOWN (stale)':(s.enabled?'ON':'OFF'));
     $('mode').textContent=s.mode<=1?'CV':'CC';
     $('vout').textContent=s.vout.toFixed(2)+' V';
     $('iout').textContent=s.iout.toFixed(3)+' A';

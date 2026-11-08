@@ -30,10 +30,14 @@ static bool fanWrite(uint8_t duty) {
 static void showLeds(const PpsStatus& p, bool blinkOn) {
     uint32_t color;
     int lit;
-    if (!p.connected) {
+    if (p.halted) {
+        color = blinkOn ? s_leds.Color(255, 0, 0) : 0;  // all red blink: fatal stop
+        lit   = LED_PER_SIDE;
+    } else if (!p.connected && !p.outputUnknown) {
         color = s_leds.Color(0, 0, 255);  // one blue LED: LEDs alive, PPS not found
         lit   = 1;
-    } else if (!p.valid) {
+    } else if (!p.connected || !p.valid) {
+        // orange blink: link lost (output may be ON) or temperature stale
         color = blinkOn ? s_leds.Color(255, 96, 0) : 0;  // orange blink: temperature unknown
         lit   = LED_PER_SIDE;
     } else {
@@ -81,7 +85,9 @@ static void thermalTask(void*) {
         showLeds(p, blinkOn);
 
         uint8_t duty;
-        if (!p.connected) duty = 0;                          // no PPS: nothing to cool
+        // The fan stops only when the output is known to be OFF (or no PPS was ever seen).
+        if (p.halted) duty = p.outputUnknown ? 100 : 0;      // fatal: full speed unless OFF confirmed
+        else if (!p.connected) duty = p.outputUnknown ? FAN_DUTY_UNKNOWN : 0;  // lost vs. absent
         else if (!p.valid) duty = FAN_DUTY_UNKNOWN;          // temperature unknown: fail safe
         else duty = fanDutyFor(p.temp, lastDuty > 0);
 

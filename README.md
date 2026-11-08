@@ -9,7 +9,8 @@ M5Stack CoreS3 (SE) で M5Stack PPS モジュールを制御する PlatformIO �
 ## セットアップ
 
 1. `src/secrets.example.h` を `src/secrets.h` にコピーし、Wi-Fi の SSID / パスワードを設定する
-   （`secrets.h` は git 管理外。無い場合はプレースホルダ値でビルドされ、警告が出る）
+   （`secrets.h` は git 管理外。無い場合はビルドエラーになる。CI のビルド確認だけは
+   `-DALLOW_PLACEHOLDER_SECRETS` を明示してテンプレートの値でコンパイルする）
 2. `pio run -t upload` で書き込み
 
 既定では SoftAP `M5S3-PPS` を起動し、`http://192.168.4.1/` から操作できる。

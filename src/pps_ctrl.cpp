@@ -2,6 +2,7 @@
 #include <M5Unified.h>
 #include "app_state.h"
 #include "config.h"
+#include "fault_inject.h"
 #include <atomic>
 
 // PPS module register map (same protocol as the M5Module-PPS library).
@@ -16,20 +17,28 @@ static constexpr uint8_t REG_VIN_READ  = 0x14;
 static constexpr uint8_t REG_VOUT_SET  = 0x18;
 static constexpr uint8_t REG_IOUT_SET  = 0x1C;
 
+// Only call with finite values: comparisons with NaN are false, so NaN would pass through.
 static float clampf(float v, float lo, float hi) {
     return v < lo ? lo : (v > hi ? hi : v);
 }
 
-// Callers must hold I2cLock.
+static bool inRange(float v, float lo, float hi) {
+    return isfinite(v) && v >= lo && v <= hi;
+}
+
+// Callers must hold I2cLock. faultPpsI2c() is always false outside test builds.
 static bool readU8(uint8_t reg, uint8_t& out) {
+    if (faultPpsI2c()) return false;
     return M5.In_I2C.readRegister(PPS_ADDR, reg, &out, 1, PPS_I2C_FREQ);
 }
 
 static bool writeU8(uint8_t reg, uint8_t v) {
+    if (faultPpsI2c()) return false;
     return M5.In_I2C.writeRegister8(PPS_ADDR, reg, v, PPS_I2C_FREQ);
 }
 
 static bool readF32(uint8_t reg, float& out) {
+    if (faultPpsI2c()) return false;
     uint8_t b[4];
     if (!M5.In_I2C.readRegister(PPS_ADDR, reg, b, sizeof(b), PPS_I2C_FREQ)) return false;
     memcpy(&out, b, sizeof(out));  // little-endian IEEE754, same as the ESP32
@@ -37,31 +46,11 @@ static bool readF32(uint8_t reg, float& out) {
 }
 
 static bool writeF32(uint8_t reg, float v) {
+    if (!isfinite(v)) return false;  // never send NaN/Inf to the PPS
+    if (faultPpsI2c()) return false;
     uint8_t b[4];
     memcpy(b, &v, sizeof(b));
     return M5.In_I2C.writeRegister(PPS_ADDR, reg, b, sizeof(b), PPS_I2C_FREQ);
-}
-
-static bool connectPps() {
-    // Drop commands queued while disconnected so a stale "ON" is never replayed.
-    PpsCmd stale;
-    while (ppsWaitCmd(stale, 0)) {
-        if (stale.id) ppsPostReply(stale.id, PPS_ERR_DISCONNECTED);
-    }
-    I2cLock lock;
-    if (!M5.In_I2C.scanID(PPS_ADDR, PPS_I2C_FREQ)) {
-        return false;
-    }
-    // Always start with output OFF and conservative settings.
-    return writeU8(REG_ENABLE, 0) &&
-           writeF32(REG_VOUT_SET, PPS_V_DEFAULT) &&
-           writeF32(REG_IOUT_SET, PPS_I_DEFAULT);
-}
-
-static bool addSetpoint(uint8_t reg, float delta, float lo, float hi) {
-    float cur;
-    if (!readF32(reg, cur)) return false;
-    return writeF32(reg, clampf(roundf((cur + delta) * 100.0f) / 100.0f, lo, hi));
 }
 
 // Output OFF is the safety action: retry and confirm by reading the register back.
@@ -73,34 +62,91 @@ static bool outputOff() {
     return false;
 }
 
-static bool applySet(const PpsCmd& c) {
+// Returns true only if the PPS answered, output OFF was confirmed by read-back
+// and the conservative default setpoints were written.
+static bool connectPps() {
+    // Drop commands queued while disconnected so a stale "ON" is never replayed.
+    PpsCmd stale;
+    while (ppsWaitCmd(stale, 0)) {
+        if (stale.id) ppsPostReply(stale.id, PPS_ERR_DISCONNECTED);
+    }
+    I2cLock lock;
+    if (faultPpsI2c() || !M5.In_I2C.scanID(PPS_ADDR, PPS_I2C_FREQ)) {
+        return false;
+    }
+    return outputOff() &&
+           writeF32(REG_VOUT_SET, PPS_V_DEFAULT) &&
+           writeF32(REG_IOUT_SET, PPS_I_DEFAULT);
+}
+
+// Relative change. The current setpoint read back from the PPS must be plausible:
+// a corrupted read must fail the command, not be clamped to a limit and written.
+static bool addSetpoint(uint8_t reg, float delta, float lo, float hi) {
+    float cur;
+    if (!readF32(reg, cur)) return false;
+    if (!inRange(cur, lo - PPS_SETPOINT_TOL, hi + PPS_SETPOINT_TOL)) {
+        Serial.printf("PPS: implausible setpoint read back (%f), command rejected\n", cur);
+        return false;
+    }
+    return writeF32(reg, clampf(roundf((cur + delta) * 100.0f) / 100.0f, lo, hi));
+}
+
+// statusValid: the PPS task's view of whether the current status is trustworthy.
+// While it is not, only output OFF is executed (same rule as the UI's FORCE OFF);
+// checking here, at execution time, avoids races with a pre-check in the caller.
+static PpsResult applySet(const PpsCmd& c, bool statusValid) {
     // OFF first, so a failing setpoint write can never delay or skip it.
-    if (c.hasEn && !c.en && !outputOff()) return false;
-    if (c.hasV && !writeF32(REG_VOUT_SET, clampf(c.v, PPS_V_MIN, PPS_V_MAX))) return false;
-    if (c.hasI && !writeF32(REG_IOUT_SET, clampf(c.i, PPS_I_MIN, PPS_I_MAX))) return false;
+    if (c.hasEn && !c.en && !outputOff()) return PPS_ERR_I2C;
+    const bool more = c.hasV || c.hasI || (c.hasEn && c.en);
+    if (!more) return PPS_OK;
+    if (!statusValid) return PPS_ERR_STALE;
+    if (c.hasV && !writeF32(REG_VOUT_SET, clampf(c.v, PPS_V_MIN, PPS_V_MAX))) return PPS_ERR_I2C;
+    if (c.hasI && !writeF32(REG_IOUT_SET, clampf(c.i, PPS_I_MIN, PPS_I_MAX))) return PPS_ERR_I2C;
     // ON last, and only after every setpoint in this command was written.
-    if (c.hasEn && c.en) return writeU8(REG_ENABLE, 1);
+    if (c.hasEn && c.en && !writeU8(REG_ENABLE, 1)) return PPS_ERR_I2C;
+    return PPS_OK;
+}
+
+// Shutdown state. s_halted is set by ppsShutdown before it takes the I2C lock and is
+// checked under the lock, so no command can be applied after the shutdown's OFF write.
+static std::atomic<bool> s_halted{false};
+static std::atomic<bool> s_shutdownDone{false};
+static std::atomic<bool> s_offConfirmed{false};
+
+static PpsResult applyCmd(const PpsCmd& c, bool statusValid) {
+    I2cLock lock;
+    if (s_halted) return PPS_ERR_DISCONNECTED;
+    switch (c.type) {
+        case CMD_SET: return applySet(c, statusValid);
+        case CMD_ADD_V:
+            if (!statusValid) return PPS_ERR_STALE;
+            return addSetpoint(REG_VOUT_SET, c.v, PPS_V_MIN, PPS_V_MAX) ? PPS_OK : PPS_ERR_I2C;
+        case CMD_ADD_I:
+            if (!statusValid) return PPS_ERR_STALE;
+            return addSetpoint(REG_IOUT_SET, c.i, PPS_I_MIN, PPS_I_MAX) ? PPS_OK : PPS_ERR_I2C;
+    }
+    return PPS_ERR_I2C;
+}
+
+// Reject values that cannot be real; there is no checksum on the I2C bus.
+static bool plausible(const PpsStatus& r, const PpsStatus& prev) {
+    if (!inRange(r.vin, -1.0f, PPS_VIN_PLAUSIBLE) || !inRange(r.vout, -1.0f, PPS_VIN_PLAUSIBLE) ||
+        !inRange(r.iout, -PPS_IOUT_PLAUSIBLE, PPS_IOUT_PLAUSIBLE) ||
+        !inRange(r.temp, PPS_TEMP_MIN_PLAUSIBLE, PPS_TEMP_MAX_PLAUSIBLE) ||
+        !inRange(r.vset, PPS_V_MIN - PPS_SETPOINT_TOL, PPS_V_MAX + PPS_SETPOINT_TOL) ||
+        !inRange(r.iset, PPS_I_MIN - PPS_SETPOINT_TOL, PPS_I_MAX + PPS_SETPOINT_TOL)) {
+        return false;
+    }
+    // The temperature drives the fan: a sudden jump between consecutive valid reads
+    // is far more likely a corrupted transfer than physics. After a stale period
+    // (prev.valid == false) a new baseline is accepted.
+    if (prev.valid && fabsf(r.temp - prev.temp) > PPS_TEMP_MAX_STEP) return false;
     return true;
 }
 
-// Set by ppsShutdown before it takes the I2C lock; checked under the lock, so no
-// command can be applied after the shutdown's OFF write.
-static std::atomic<bool> s_halted{false};
-
-static bool applyCmd(const PpsCmd& c) {
-    I2cLock lock;
-    if (s_halted) return false;
-    switch (c.type) {
-        case CMD_SET: return applySet(c);
-        case CMD_ADD_V: return addSetpoint(REG_VOUT_SET, c.v, PPS_V_MIN, PPS_V_MAX);
-        case CMD_ADD_I: return addSetpoint(REG_IOUT_SET, c.i, PPS_I_MIN, PPS_I_MAX);
-    }
-    return false;
-}
-
-// Reads every register into a scratch copy and commits only if all reads succeed,
-// so a transient I2C error never publishes partial values or a false "output OFF".
-// On failure the previous snapshot is kept unchanged.
+// Reads every register into a scratch copy and commits only if all reads succeed
+// and the values are plausible, so a transient I2C error never publishes partial or
+// corrupted values or a false "output OFF". On failure the snapshot is left unchanged.
 static bool readStatus(PpsStatus& s) {
     PpsStatus r = s;
     uint8_t en = 0;
@@ -116,31 +162,44 @@ static bool readStatus(PpsStatus& s) {
              readF32(REG_IOUT_SET, r.iset) &&
              readU8(REG_ENABLE, en);
     }
-    // A corrupted transfer can yield NaN/Inf; treat that as a failed read too.
-    ok = ok && isfinite(r.vin) && isfinite(r.vout) && isfinite(r.iout) && isfinite(r.temp) &&
-         isfinite(r.vset) && isfinite(r.iset);
-    if (!ok) return false;  // s untouched; ppsTask decides when it becomes stale
+    if (!ok) return false;
+    if (!plausible(r, s)) {
+        Serial.printf("PPS: implausible status rejected (vin %.2f vout %.2f iout %.3f temp %.1f vset %.2f iset %.2f)\n",
+                      r.vin, r.vout, r.iout, r.temp, r.vset, r.iset);
+        return false;
+    }
     r.enabled = en != 0;
     r.valid   = true;
     s = r;
     return true;
 }
 
+static void haltedLoop() {
+    // ppsShutdown publishes nothing itself; wait until its OFF attempt has finished
+    // so the published state says whether OFF was confirmed.
+    while (!s_shutdownDone) vTaskDelay(pdMS_TO_TICKS(10));
+    PpsStatus h;
+    h.halted        = true;
+    h.outputUnknown = !s_offConfirmed;
+    stateSetPps(h);
+    // "Not connected" makes the web API answer 503 instead of timing out.
+    PpsCmd stale;
+    for (;;) {
+        if (ppsWaitCmd(stale, portMAX_DELAY) && stale.id) ppsPostReply(stale.id, PPS_ERR_DISCONNECTED);
+    }
+}
+
 static void ppsTask(void*) {
     PpsStatus st;
     TickType_t lastGoodRead = 0;
     for (;;) {
-        if (s_halted) {
-            // Report "not connected" so the web API answers 503 instead of timing out.
-            stateSetPps(PpsStatus{});
-            PpsCmd stale;
-            while (ppsWaitCmd(stale, portMAX_DELAY)) {
-                if (stale.id) ppsPostReply(stale.id, PPS_ERR_DISCONNECTED);
-            }
-        }
+        if (s_halted) haltedLoop();
         if (!st.connected) {
-            st = PpsStatus{};
-            st.connected = connectPps();
+            // Keep "output unknown" across reconnect attempts until OFF is confirmed.
+            const bool unknown = st.outputUnknown;
+            st                 = PpsStatus{};
+            st.connected       = connectPps();
+            st.outputUnknown   = unknown && !st.connected;
             stateSetPps(st);
             if (!st.connected) {
                 vTaskDelay(pdMS_TO_TICKS(1000));
@@ -157,14 +216,14 @@ static void ppsTask(void*) {
         for (;;) {
             const TickType_t now = xTaskGetTickCount();
             if ((int32_t)(deadline - now) <= 0 || !ppsWaitCmd(cmd, deadline - now)) break;
-            const bool applied = applyCmd(cmd);
-            if (cmd.id) ppsPostReply(cmd.id, applied ? PPS_OK : PPS_ERR_I2C);
-            if (!applied) Serial.printf("PPS: command type %u failed\n", cmd.type);
+            const PpsResult r = applyCmd(cmd, st.valid);
+            if (cmd.id) ppsPostReply(cmd.id, r);
+            if (r != PPS_OK) Serial.printf("PPS: command type %u not applied (result %u)\n", cmd.type, r);
         }
 
         // Brief read errors keep the last good snapshot (still valid). Only a
         // sustained outage marks it stale, and a longer one forces a reconnect
-        // (which restarts the PPS with output OFF).
+        // (which restarts the PPS with output OFF, confirmed by read-back).
         bool readOk = readStatus(st);
         if (!readOk) {
             // One immediate retry absorbs single glitches (e.g. fan motor noise).
@@ -178,8 +237,9 @@ static void ppsTask(void*) {
             Serial.printf("PPS: status read failed (%lu ms since last good read)\n", (unsigned long)sinceMs);
             if (sinceMs >= PPS_STALE_MS) st.valid = false;
             if (sinceMs >= PPS_LOST_MS) {
-                Serial.println("PPS: no response, reconnecting");
-                st.connected = false;
+                Serial.println("PPS: no response, reconnecting (output state unknown until OFF is confirmed)");
+                st.connected     = false;
+                st.outputUnknown = true;
             }
         }
         stateSetPps(st);
@@ -193,8 +253,15 @@ bool ppsTaskStart() {
 
 bool ppsShutdown() {
     s_halted = true;
-    // If the RTOS objects were never created, no other task can be using the bus.
-    if (!i2cMutex()) return outputOff();
-    I2cLock lock;
-    return outputOff();
+    bool off;
+    if (!i2cMutex()) {
+        // The RTOS objects were never created, so no other task can be using the bus.
+        off = outputOff();
+    } else {
+        I2cLock lock;
+        off = outputOff();
+    }
+    s_offConfirmed = off;
+    s_shutdownDone = true;
+    return off;
 }

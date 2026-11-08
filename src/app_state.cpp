@@ -1,6 +1,7 @@
 #include "app_state.h"
 #include <freertos/queue.h>
 #include <atomic>
+#include "config.h"
 
 struct PpsReply {
     uint32_t id;
@@ -10,7 +11,7 @@ struct PpsReply {
 static SemaphoreHandle_t s_stateMutex;
 static SemaphoreHandle_t s_i2cMutex;
 static QueueHandle_t s_ppsQueue;
-static QueueHandle_t s_replyQueue;  // length 1, written with xQueueOverwrite
+static QueueHandle_t s_replyQueue;  // FIFO, deeper than the command queue
 
 static PpsStatus s_pps;
 static BatteryStatus s_batt;
@@ -20,8 +21,8 @@ static ThermalStatus s_thermal;
 bool appStateInit() {
     s_stateMutex = xSemaphoreCreateMutex();
     s_i2cMutex   = xSemaphoreCreateMutex();
-    s_ppsQueue   = xQueueCreate(8, sizeof(PpsCmd));
-    s_replyQueue = xQueueCreate(1, sizeof(PpsReply));
+    s_ppsQueue   = xQueueCreate(PPS_CMD_QUEUE_LEN, sizeof(PpsCmd));
+    s_replyQueue = xQueueCreate(PPS_REPLY_QUEUE_LEN, sizeof(PpsReply));
     return s_stateMutex && s_i2cMutex && s_ppsQueue && s_replyQueue;
 }
 
@@ -73,7 +74,13 @@ uint32_t ppsNextCmdId() {
 
 void ppsPostReply(uint32_t id, PpsResult r) {
     const PpsReply rep{id, r};
-    xQueueOverwrite(s_replyQueue, &rep);
+    // Only the PPS task posts. If the queue is somehow full of unclaimed replies,
+    // drop the oldest one rather than the newest.
+    if (xQueueSend(s_replyQueue, &rep, 0) != pdTRUE) {
+        PpsReply oldest;
+        xQueueReceive(s_replyQueue, &oldest, 0);
+        xQueueSend(s_replyQueue, &rep, 0);
+    }
 }
 
 bool ppsWaitReply(uint32_t id, PpsResult& out, TickType_t timeout) {

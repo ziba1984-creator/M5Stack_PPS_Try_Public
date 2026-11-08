@@ -2,6 +2,7 @@
 #include "app_state.h"
 #include "battery.h"
 #include "fatal.h"
+#include "fault_inject.h"
 #include "pps_ctrl.h"
 #include "thermal.h"
 #include "ui_task.h"
@@ -22,6 +23,7 @@ void setup() {
     if (!webTaskStart()) systemFatal("web task creation failed");
     if (!thermalTaskStart()) systemFatal("thermal task creation failed");
     if (!uiTaskStart()) systemFatal("UI task creation failed");
+    if (!faultTaskStart()) systemFatal("fault task creation failed");  // no-op unless test build
 }
 
 void loop() {
