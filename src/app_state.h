@@ -40,8 +40,10 @@ struct ThermalStatus {
 struct NetStatus {
     bool apUp  = false;
     bool staUp = false;
+    bool staEnabled = false;  // an STA SSID is configured
     char apIp[16]  = "";
     char staIp[16] = "";
+    char staSsid[33] = "";
     int clients = 0;
 };
 

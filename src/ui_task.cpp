@@ -57,7 +57,15 @@ void draw(const PpsStatus& p, const BatteryStatus& b, const NetStatus& n) {
         snprintf(buf, sizeof(buf), "BAT --");
     }
     canvas.drawString(buf, 4, 4, &fonts::Font2);
-    snprintf(buf, sizeof(buf), "AP %s (%d)", n.apIp, n.clients);
+    // The AP address is fixed (192.168.4.1), so once the STA is up show its address
+    // instead: that is the one needed to open the web page from the home network.
+    if (n.staUp) {
+        snprintf(buf, sizeof(buf), "STA %s", n.staIp);
+    } else if (n.staEnabled) {
+        snprintf(buf, sizeof(buf), "STA.. AP %s(%d)", n.apIp, n.clients);
+    } else {
+        snprintf(buf, sizeof(buf), "AP %s (%d)", n.apIp, n.clients);
+    }
     canvas.setTextDatum(top_right);
     canvas.drawString(buf, 316, 4, &fonts::Font2);
     canvas.drawFastHLine(0, 24, 320, DARKGREY);

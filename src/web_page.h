@@ -24,6 +24,8 @@ input{width:6em;font-size:1.1em}button{font-size:1.1em;padding:.4em .8em;margin:
 <tr><td>Set V / I</td><td class="v" id="set">-</td></tr>
 <tr><td>Fan</td><td class="v" id="fan">-</td></tr>
 <tr><td>Battery</td><td class="v" id="batt">-</td></tr>
+<tr><td>Wi-Fi AP</td><td class="v" id="ap">-</td></tr>
+<tr><td>Wi-Fi STA</td><td class="v" id="sta">-</td></tr>
 </table>
 <p>Voltage [V] <input id="v" type="number" step="0.1" min="0.5" max="30">
 <button onclick="send('v',v.value)">Set</button></p>
@@ -31,6 +33,15 @@ input{width:6em;font-size:1.1em}button{font-size:1.1em;padding:.4em .8em;margin:
 <button onclick="send('i',i.value)">Set</button></p>
 <p><button onclick="send('en',1)">Output ON</button>
 <button onclick="send('en',0)">Output OFF</button></p>
+<details><summary>Wi-Fi STA settings</summary>
+<p>SSID <input id="ssid" maxlength="32" autocomplete="off" style="width:12em"></p>
+<p>Password <input id="pass" type="password" maxlength="63" autocomplete="new-password" style="width:12em"></p>
+<p><button onclick="setWifi(ssid.value,pass.value)">Save &amp; connect</button>
+<button onclick="setWifi('','')">Disable STA</button></p>
+<p><small>Password: re-enter every time (empty = open network). It is never shown again.
+The AP may drop for a moment when the STA connects (it follows the router's channel).</small></p>
+<div id="wmsg"></div>
+</details>
 <script>
 const $=id=>document.getElementById(id);
 async function send(k,val){
@@ -38,6 +49,13 @@ async function send(k,val){
     const r=await fetch('/api/set',{method:'POST',headers:{'X-PPS':'1'},body:new URLSearchParams({[k]:val})});
     $('err').textContent=r.ok?'':'Error '+r.status+': '+await r.text();
   }catch(e){$('err').textContent='Error: request failed (result unknown)';}
+}
+async function setWifi(ss,pw){
+  try{
+    const r=await fetch('/api/wifi',{method:'POST',headers:{'X-PPS':'1'},body:new URLSearchParams({ssid:ss,pass:pw})});
+    $('wmsg').textContent=(r.ok?'':'Error '+r.status+': ')+await r.text();
+    if(r.ok)$('pass').value='';
+  }catch(e){$('wmsg').textContent='Error: request failed (result unknown)';}
 }
 async function poll(){
   try{
@@ -54,6 +72,9 @@ async function poll(){
     $('set').textContent=s.vset.toFixed(2)+' V / '+s.iset.toFixed(2)+' A';
     $('fan').textContent=s.fan<0?'not found':s.fan+' %';
     $('batt').textContent=(s.batt_level<0?'--':s.batt_level+'%')+' '+s.batt_mv+'mV'+(s.charging?' (charging)':'');
+    $('ap').textContent=s.ap_ip+' ('+s.ap_clients+' clients)';
+    $('sta').textContent=!s.sta_enabled?'disabled':(s.sta_ssid+': '+(s.sta_up?s.sta_ip:'connecting...'));
+    if($('err').textContent==='Connection lost')$('err').textContent='';
   }catch(e){$('err').textContent='Connection lost';}
   setTimeout(poll,500);
 }
