@@ -52,7 +52,7 @@ static_assert(sizeof(AP_PASS) - 1 >= 8 && sizeof(AP_PASS) - 1 <= 63, "AP_PASS mu
 #define FAN_I2C_FREQ     100000U
 #define FAN_T_ON         38.0f
 #define FAN_T_OFF        35.0f
-#define FAN_T_FULL       42.0f  // = TEMP_CRITICAL
+#define FAN_T_FULL       42.0f  // full speed before TEMP_CRITICAL (45) is reached
 #define FAN_DUTY_MIN     30
 #define FAN_DUTY_UNKNOWN 50     // while the PPS temperature read is stale
 #define FAN_PROBE_MS     5000   // retry interval when the fan module is not found
@@ -65,7 +65,7 @@ static_assert(sizeof(AP_PASS) - 1 >= 8 && sizeof(AP_PASS) - 1 <= 63, "AP_PASS mu
 #define LED_PER_SIDE   5
 #define LED_BRIGHTNESS 40      // 0-255; keep low to save battery
 #define LED_T_LOW      25.0f   // 1 LED lit at or below this temperature
-#define LED_T_HIGH     50.0f   // all 5 lit at or above this temperature
+#define LED_T_HIGH     45.0f   // all 5 lit at or above this temperature (= TEMP_CRITICAL)
 #define THERMAL_PERIOD_MS 500  // also the LED blink half-period
 
 // Tasks: name, stack(bytes), priority, core
