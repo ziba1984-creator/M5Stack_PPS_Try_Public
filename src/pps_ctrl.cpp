@@ -112,6 +112,9 @@ static void markFailed(PpsStatus& st, bool outputMayBeOn) {
 }
 
 static PpsResult applySet(const PpsCmd& c, PpsStatus& st) {
+    // An OFF posted after this ON jumped ahead of it in the queue: running the ON now
+    // would undo that OFF. Reject the whole command before writing anything.
+    if (c.hasEn && c.en && c.offSeq != ppsOffSeq()) return PPS_ERR_SUPERSEDED;
     // OFF first, so a failing setpoint write can never delay or skip it.
     if (c.hasEn && !c.en) {
         if (!outputOff()) {

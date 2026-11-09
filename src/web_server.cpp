@@ -32,7 +32,16 @@ static void handleStatus() {
     server.send(200, "application/json", buf);
 }
 
+// CSRF guard: a custom header cannot be added to a cross-origin request without a
+// CORS preflight, and this server never answers preflights. So only the page served
+// from this device (or a non-browser client that sets it on purpose) can POST here.
+static constexpr const char* CSRF_HEADER = "X-PPS";
+
 static void handleSet() {
+    if (server.header(CSRF_HEADER) != "1") {
+        server.send(403, "text/plain", "missing X-PPS header");
+        return;
+    }
     if (!stateGetPps().connected) {
         server.send(503, "text/plain", "PPS not connected");
         return;
@@ -88,6 +97,9 @@ static void handleSet() {
                         "PPS status stale: only output OFF is allowed (OFF was applied if requested; "
                         "other changes were not)");
             return;
+        case PPS_ERR_SUPERSEDED:
+            server.send(409, "text/plain", "superseded: a later output OFF was requested (not applied)");
+            return;
     }
     server.send(500, "text/plain", "internal error");
 }
@@ -97,6 +109,8 @@ static void webTask(void*) {
     while (!stateGetNet().apUp) {
         vTaskDelay(pdMS_TO_TICKS(100));
     }
+    static const char* headerKeys[] = {CSRF_HEADER};
+    server.collectHeaders(headerKeys, 1);
     server.on("/", HTTP_GET, [] { server.send_P(200, "text/html; charset=utf-8", INDEX_HTML); });
     server.on("/api/status", HTTP_GET, handleStatus);
     server.on("/api/set", HTTP_POST, handleSet);

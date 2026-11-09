@@ -35,7 +35,7 @@ input{width:6em;font-size:1.1em}button{font-size:1.1em;padding:.4em .8em;margin:
 const $=id=>document.getElementById(id);
 async function send(k,val){
   try{
-    const r=await fetch('/api/set',{method:'POST',body:new URLSearchParams({[k]:val})});
+    const r=await fetch('/api/set',{method:'POST',headers:{'X-PPS':'1'},body:new URLSearchParams({[k]:val})});
     $('err').textContent=r.ok?'':'Error '+r.status+': '+await r.text();
   }catch(e){$('err').textContent='Error: request failed (result unknown)';}
 }

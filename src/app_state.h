@@ -56,6 +56,7 @@ enum PpsResult : uint8_t {
     PPS_ERR_I2C,           // a write or the OFF read-back failed; device state may be partial
     PPS_ERR_DISCONNECTED,  // dropped because the PPS was (re)connecting; nothing was applied
     PPS_ERR_STALE,         // status is stale: only output OFF is allowed (OFF, if requested, was applied)
+    PPS_ERR_SUPERSEDED,    // an output-OFF was posted after this output-ON: nothing was applied
 };
 
 struct PpsCmd {
@@ -64,6 +65,7 @@ struct PpsCmd {
     bool en   = false;
     float v = 0, i = 0;
     uint32_t id = 0;  // non-zero: pps_ctrl posts a reply with this id when done
+    uint32_t offSeq = 0;  // set by ppsPostCmd: OFF sequence number at post time
 };
 
 // Returns false if any mutex or queue could not be created; nothing else may be used then.
@@ -80,8 +82,12 @@ void stateSetNet(const NetStatus& s);
 
 // Only pps_ctrl consumes the queue; UI and Web post to it.
 // Output-OFF jumps the queue. Returns false if the queue stayed full for `timeout`.
+// Because OFF can overtake an output-ON that is already queued, every OFF bumps a
+// sequence number and every command records it when posted (PpsCmd::offSeq).
+// pps_ctrl rejects an ON whose offSeq != ppsOffSeq(): an OFF posted later always wins.
 bool ppsPostCmd(const PpsCmd& c, TickType_t timeout = 0);
 bool ppsWaitCmd(PpsCmd& out, TickType_t timeout);
+uint32_t ppsOffSeq();
 
 // Completion reporting for commands with a non-zero id. Replies are kept in FIFO order
 // (deeper than the command queue), so a late reply for a timed-out request can never

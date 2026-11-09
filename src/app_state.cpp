@@ -52,11 +52,20 @@ void stateSetThermal(const ThermalStatus& s) { setLocked(s_thermal, s); }
 NetStatus stateGetNet() { return getLocked(s_net); }
 void stateSetNet(const NetStatus& s) { setLocked(s_net, s); }
 
+static std::atomic<uint32_t> s_offSeq{0};
+
+uint32_t ppsOffSeq() { return s_offSeq; }
+
 bool ppsPostCmd(const PpsCmd& c, TickType_t timeout) {
-    if (c.type == CMD_SET && c.hasEn && !c.en) {
-        return xQueueSendToFront(s_ppsQueue, &c, timeout) == pdTRUE;
+    PpsCmd q = c;
+    if (q.type == CMD_SET && q.hasEn && !q.en) {
+        // Bump before queueing (even if the send then fails): any ON still waiting in
+        // the queue was posted before this OFF and must not run after it.
+        q.offSeq = s_offSeq.fetch_add(1) + 1;
+        return xQueueSendToFront(s_ppsQueue, &q, timeout) == pdTRUE;
     }
-    return xQueueSend(s_ppsQueue, &c, timeout) == pdTRUE;
+    q.offSeq = s_offSeq;
+    return xQueueSend(s_ppsQueue, &q, timeout) == pdTRUE;
 }
 
 bool ppsWaitCmd(PpsCmd& out, TickType_t timeout) {

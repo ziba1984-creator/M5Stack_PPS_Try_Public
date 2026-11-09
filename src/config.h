@@ -13,6 +13,9 @@
 #else
 #error "src/secrets.h not found: copy src/secrets.example.h to src/secrets.h and set your own Wi-Fi credentials"
 #endif
+// WiFi.softAP() fails on a WPA2 passphrase outside 8-63 characters, and the web
+// server would then never start. Catch it at build time instead.
+static_assert(sizeof(AP_PASS) - 1 >= 8 && sizeof(AP_PASS) - 1 <= 63, "AP_PASS must be 8-63 characters (WPA2)");
 #define STA_RETRY_MS 15000
 
 // PPS limits (clamped in pps_ctrl)
@@ -41,15 +44,15 @@
 #define PPS_TEMP_MAX_STEP  10.0f   // larger jump between consecutive valid reads is rejected
 
 // Temperature bands (PPS module temperature, deg C), shared by fan and LEDs
-#define TEMP_WARM      40.0f  // LED yellow
-#define TEMP_HOT       45.0f  // LED red
-#define TEMP_CRITICAL  50.0f  // LED red blinking
+#define TEMP_WARM      35.0f  // LED yellow
+#define TEMP_HOT       40.0f  // LED red
+#define TEMP_CRITICAL  45.0f  // LED red blinking
 
 // Fan Module v1.1: off below FAN_T_ON (stays on down to FAN_T_OFF), FAN_DUTY_MIN..100 % up to FAN_T_FULL
 #define FAN_I2C_FREQ     100000U
-#define FAN_T_ON         40.0f
-#define FAN_T_OFF        38.0f
-#define FAN_T_FULL       50.0f  // = TEMP_CRITICAL
+#define FAN_T_ON         38.0f
+#define FAN_T_OFF        35.0f
+#define FAN_T_FULL       42.0f  // = TEMP_CRITICAL
 #define FAN_DUTY_MIN     30
 #define FAN_DUTY_UNKNOWN 50     // while the PPS temperature read is stale
 #define FAN_PROBE_MS     5000   // retry interval when the fan module is not found
