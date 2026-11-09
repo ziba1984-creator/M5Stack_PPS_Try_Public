@@ -62,21 +62,66 @@ static bool outputOff() {
     return false;
 }
 
-// Returns true only if the PPS answered, output OFF was confirmed by read-back
+// Where a connection attempt stopped, for the log.
+enum ConnectResult : uint8_t { CONN_OK, CONN_NO_ACK, CONN_OFF_FAILED, CONN_SETPOINT_FAILED };
+
+static const char* connectResultText(ConnectResult r) {
+    switch (r) {
+        case CONN_OK: return "ok";
+        case CONN_NO_ACK: return "no ACK at 0x35 (PPS not answering)";
+        case CONN_OFF_FAILED: return "answered, but output OFF not confirmed";
+        case CONN_SETPOINT_FAILED: return "answered, OFF confirmed, default setpoint write failed";
+    }
+    return "?";
+}
+
+// CONN_OK only if the PPS answered, output OFF was confirmed by read-back
 // and the conservative default setpoints were written.
-static bool connectPps() {
+static ConnectResult connectPps() {
     // Drop commands queued while disconnected so a stale "ON" is never replayed.
     PpsCmd stale;
     while (ppsWaitCmd(stale, 0)) {
         if (stale.id) ppsPostReply(stale.id, PPS_ERR_DISCONNECTED);
     }
     I2cLock lock;
-    if (faultPpsI2c() || !M5.In_I2C.scanID(PPS_ADDR, PPS_I2C_FREQ)) {
-        return false;
+    if (faultPpsI2c() || !M5.In_I2C.scanID(PPS_ADDR, PPS_I2C_FREQ)) return CONN_NO_ACK;
+    if (!outputOff()) return CONN_OFF_FAILED;
+    if (!writeF32(REG_VOUT_SET, PPS_V_DEFAULT) || !writeF32(REG_IOUT_SET, PPS_I_DEFAULT)) {
+        return CONN_SETPOINT_FAILED;
     }
-    return outputOff() &&
-           writeF32(REG_VOUT_SET, PPS_V_DEFAULT) &&
-           writeF32(REG_IOUT_SET, PPS_I_DEFAULT);
+    return CONN_OK;
+}
+
+// Rate-limited log of failed connection attempts (one per second while the PPS is
+// missing): the first failure right away, then every PPS_CONN_LOG_MS, then a summary
+// when the PPS answers again. The fan sits on the same I2C bus, so its state tells a
+// stuck bus (fan failing too) from a PPS that alone stopped answering.
+struct ConnLog {
+    uint32_t fails     = 0;
+    uint32_t firstMs   = 0;
+    uint32_t lastLogMs = 0;
+};
+
+static void logConnectAttempt(ConnLog& l, ConnectResult r, bool outputUnknown) {
+    const uint32_t now = millis();
+    if (r == CONN_OK) {
+        if (l.fails) {
+            Serial.printf("PPS: connected after %lu failed attempts (%lu ms)\n", (unsigned long)l.fails,
+                          (unsigned long)(now - l.firstMs));
+        } else {
+            Serial.println("PPS: connected");
+        }
+        l = ConnLog{};
+        return;
+    }
+    if (l.fails++ == 0) l.firstMs = now;
+    if (l.fails == 1 || now - l.lastLogMs >= PPS_CONN_LOG_MS) {
+        l.lastLogMs           = now;
+        const ThermalStatus t = stateGetThermal();
+        Serial.printf("PPS: connect failed: %s | %lu attempts, %lu ms | output %s | fan(same bus) %s\n",
+                      connectResultText(r), (unsigned long)l.fails, (unsigned long)(now - l.firstMs),
+                      outputUnknown ? "UNKNOWN" : "off/never seen", t.fanPresent ? "OK" : "not detected (yet)");
+    }
 }
 
 // Relative change. The current setpoint read back from the PPS must be plausible:
@@ -238,14 +283,17 @@ static void haltedLoop() {
 static void ppsTask(void*) {
     PpsStatus st;
     TickType_t lastGoodRead = 0;
+    ConnLog connLog;
     for (;;) {
         if (s_halted) haltedLoop();
         if (!st.connected) {
             // Keep "output unknown" across reconnect attempts until OFF is confirmed.
-            const bool unknown = st.outputUnknown;
-            st                 = PpsStatus{};
-            st.connected       = connectPps();
-            st.outputUnknown   = unknown && !st.connected;
+            const bool unknown       = st.outputUnknown;
+            const ConnectResult conn = connectPps();
+            st                       = PpsStatus{};
+            st.connected             = conn == CONN_OK;
+            st.outputUnknown         = unknown && !st.connected;
+            logConnectAttempt(connLog, conn, st.outputUnknown);
             stateSetPps(st);
             if (!st.connected) {
                 vTaskDelay(pdMS_TO_TICKS(1000));

@@ -30,6 +30,7 @@ static_assert(sizeof(AP_PASS) - 1 >= 8 && sizeof(AP_PASS) - 1 <= 63, "AP_PASS mu
 #define PPS_STALE_MS   1000  // no good status read for this long: show STALE / FORCE OFF
 #define PPS_LOST_MS    3000  // no good status read for this long: reconnect (output restarts OFF)
 #define PPS_OFF_RETRIES 3    // output-OFF write+read-back attempts
+#define PPS_CONN_LOG_MS 10000  // while the PPS is missing, log the connect failure this often
 #define PPS_CMD_TIMEOUT_MS 1000  // how long /api/set waits for the PPS task's result
 #define PPS_CMD_QUEUE_LEN   8
 #define PPS_REPLY_QUEUE_LEN 16   // > command queue, so pending replies are never overwritten
