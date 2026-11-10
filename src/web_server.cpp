@@ -47,7 +47,7 @@ static void handleStatus() {
              "\"iout\":%.4f,\"temp\":%.1f,\"vset\":%.3f,\"iset\":%.3f,"
              "\"batt_level\":%d,\"batt_mv\":%d,\"charging\":%s,\"fan\":%d,"
              "\"ap_ip\":\"%s\",\"ap_clients\":%d,\"sta_enabled\":%s,\"sta_ssid\":\"%s\",\"sta_up\":%s,\"sta_ip\":\"%s\","
-             "\"sta_state\":\"%s\"}",
+             "\"sta_state\":\"%s\",\"nat\":%s}",
              p.connected ? "true" : "false", p.valid ? "true" : "false", p.verifying ? "true" : "false",
              p.outputUnknown ? "true" : "false", p.halted ? "true" : "false",
              p.enabled ? "true" : "false", p.mode, p.vin, p.vout,
@@ -55,7 +55,8 @@ static void handleStatus() {
              t.fanPresent ? (int)t.fanDuty : -1,
              n.apIp, n.clients, n.staEnabled ? "true" : "false", ssid, n.staUp ? "true" : "false",
              n.staUp ? n.staIp : "",
-             !n.staEnabled ? "disabled" : n.staUp ? "connected" : n.staGaveUp ? "gave_up" : "connecting");
+             !n.staEnabled ? "disabled" : n.staUp ? "connected" : n.staGaveUp ? "gave_up" : "connecting",
+             n.natOn ? "true" : "false");
     server.send(200, "application/json", buf);
 }
 

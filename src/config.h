@@ -21,6 +21,16 @@ static_assert(sizeof(AP_PASS) - 1 >= 8 && sizeof(AP_PASS) - 1 <= 63, "AP_PASS mu
 // channel scanning). Give up after this long without a connection; retry from the web.
 #define STA_GIVE_UP_MS 30000
 
+// NAT (NAPT): while the STA is connected, devices on the AP reach the STA's network
+// (and the internet) through the M5. Needs Arduino core 3.x. 0 = never enable.
+#define NAT_ENABLE 1
+// AP addressing. The DHCP server on the AP hands out NAT_DNS as the DNS server
+// (fixed: lwIP does not relay DNS, and changing it at runtime would restart DHCP).
+// The STA's network must not use 192.168.4.0/24, or routing breaks.
+#define AP_IP_ADDR     192, 168, 4, 1
+#define AP_LEASE_START 192, 168, 4, 2
+#define NAT_DNS        8, 8, 8, 8
+
 // PPS limits (clamped in pps_ctrl)
 #define PPS_I2C_FREQ   100000U  // 100 kHz for noise margin (fan motor on the same bus)
 #define PPS_V_MIN      0.5f

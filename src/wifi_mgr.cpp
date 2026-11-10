@@ -99,11 +99,19 @@ static void wifiTask(void*) {
     // Credentials are managed here (NVS "sta"); keep the Arduino core from storing its own copy.
     WiFi.persistent(false);
     WiFi.mode(cur.ssid[0] ? WIFI_AP_STA : WIFI_AP);
+    // Explicit addressing so the DHCP server hands AP clients a DNS server they can
+    // use once NAT routes them out through the STA.
+    const IPAddress apIp(AP_IP_ADDR);
+    if (!WiFi.softAPConfig(apIp, apIp, IPAddress(255, 255, 255, 0), IPAddress(AP_LEASE_START), IPAddress(NAT_DNS))) {
+        Serial.println("WIFI: softAPConfig failed (default AP addressing, no DNS for NAT clients)");
+    }
     const bool apUp = WiFi.softAP(AP_SSID, AP_PASS);
     startSta(cur);
     uint32_t lastAttempt = millis();  // last connected moment or last (re)connect kick
     uint32_t lastUpMs    = millis();  // last connected moment or start of the current attempt
     bool gaveUp          = false;
+    bool natOn           = false;
+    bool natErrLogged    = false;
 
     for (;;) {
         StaConfig next;
@@ -149,6 +157,20 @@ static void wifiTask(void*) {
             }
         }
         n.staGaveUp = useSta && gaveUp;
+
+        // NAT follows the STA link: on while connected, off otherwise.
+        const bool wantNat = NAT_ENABLE && n.staUp;
+        if (wantNat != natOn) {
+            if (WiFi.AP.enableNAPT(wantNat)) {
+                natOn        = wantNat;
+                natErrLogged = false;
+                Serial.printf("WIFI: NAT %s\n", natOn ? "on (AP clients -> STA)" : "off");
+            } else if (!natErrLogged) {
+                natErrLogged = true;
+                Serial.printf("WIFI: NAT %s failed (will retry)\n", wantNat ? "enable" : "disable");
+            }
+        }
+        n.natOn = natOn;
         stateSetNet(n);
         // Short period so a new setting from the web page is applied promptly.
         vTaskDelay(pdMS_TO_TICKS(changed || retry ? 100 : 500));

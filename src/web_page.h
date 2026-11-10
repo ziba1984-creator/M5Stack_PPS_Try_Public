@@ -26,6 +26,7 @@ input{width:6em;font-size:1.1em}button{font-size:1.1em;padding:.4em .8em;margin:
 <tr><td>Battery</td><td class="v" id="batt">-</td></tr>
 <tr><td>Wi-Fi AP</td><td class="v" id="ap">-</td></tr>
 <tr><td>Wi-Fi STA</td><td class="v" id="sta">-</td></tr>
+<tr><td>NAT (AP &rarr; STA)</td><td class="v" id="nat">-</td></tr>
 </table>
 <p>Voltage [V] <input id="v" type="number" step="0.1" min="0.5" max="30">
 <button onclick="send('v',v.value)">Set</button></p>
@@ -84,6 +85,7 @@ async function poll(){
     $('ap').textContent=s.ap_ip+' ('+s.ap_clients+' clients)';
     $('sta').textContent=s.sta_state==='disabled'?'disabled':(s.sta_ssid+': '+
       ({connected:s.sta_ip,connecting:'connecting...',gave_up:'not found (gave up, use Retry STA)'}[s.sta_state]||s.sta_state));
+    $('nat').textContent=s.nat?'ON':'off';
     if($('err').textContent==='Connection lost')$('err').textContent='';
   }catch(e){$('err').textContent='Connection lost';}
   setTimeout(poll,500);

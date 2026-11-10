@@ -42,6 +42,7 @@ struct NetStatus {
     bool staUp = false;
     bool staEnabled = false;  // an STA SSID is configured
     bool staGaveUp  = false;  // not connected within STA_GIVE_UP_MS: STA off until a retry
+    bool natOn      = false;  // NAPT active: AP clients are routed out through the STA
     char apIp[16]  = "";
     char staIp[16] = "";
     char staSsid[33] = "";
