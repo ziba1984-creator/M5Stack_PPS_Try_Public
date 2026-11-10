@@ -46,14 +46,16 @@ static void handleStatus() {
              "\"mode\":%u,\"vin\":%.3f,\"vout\":%.3f,"
              "\"iout\":%.4f,\"temp\":%.1f,\"vset\":%.3f,\"iset\":%.3f,"
              "\"batt_level\":%d,\"batt_mv\":%d,\"charging\":%s,\"fan\":%d,"
-             "\"ap_ip\":\"%s\",\"ap_clients\":%d,\"sta_enabled\":%s,\"sta_ssid\":\"%s\",\"sta_up\":%s,\"sta_ip\":\"%s\"}",
+             "\"ap_ip\":\"%s\",\"ap_clients\":%d,\"sta_enabled\":%s,\"sta_ssid\":\"%s\",\"sta_up\":%s,\"sta_ip\":\"%s\","
+             "\"sta_state\":\"%s\"}",
              p.connected ? "true" : "false", p.valid ? "true" : "false", p.verifying ? "true" : "false",
              p.outputUnknown ? "true" : "false", p.halted ? "true" : "false",
              p.enabled ? "true" : "false", p.mode, p.vin, p.vout,
              p.iout, p.temp, p.vset, p.iset, b.level, b.mv, b.charging ? "true" : "false",
              t.fanPresent ? (int)t.fanDuty : -1,
              n.apIp, n.clients, n.staEnabled ? "true" : "false", ssid, n.staUp ? "true" : "false",
-             n.staUp ? n.staIp : "");
+             n.staUp ? n.staIp : "",
+             !n.staEnabled ? "disabled" : n.staUp ? "connected" : n.staGaveUp ? "gave_up" : "connecting");
     server.send(200, "application/json", buf);
 }
 
@@ -150,6 +152,16 @@ static void handleWifi() {
     server.send(500, "text/plain", "internal error");
 }
 
+static void handleWifiRetry() {
+    if (!csrfOk()) return;
+    if (!stateGetNet().staEnabled) {
+        server.send(409, "text/plain", "no STA network saved");
+        return;
+    }
+    wifiRetrySta();
+    server.send(200, "text/plain", "retrying STA connection");
+}
+
 static void webTask(void*) {
     // The network stack must be up before the server opens its socket.
     while (!stateGetNet().apUp) {
@@ -161,6 +173,7 @@ static void webTask(void*) {
     server.on("/api/status", HTTP_GET, handleStatus);
     server.on("/api/set", HTTP_POST, handleSet);
     server.on("/api/wifi", HTTP_POST, handleWifi);
+    server.on("/api/wifi/retry", HTTP_POST, handleWifiRetry);
     server.onNotFound([] { server.send(404, "text/plain", "not found"); });
     server.begin();
     for (;;) {

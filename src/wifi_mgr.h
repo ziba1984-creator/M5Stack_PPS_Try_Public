@@ -10,3 +10,7 @@ enum WifiSetResult { WIFI_SET_OK, WIFI_SET_BAD_SSID, WIFI_SET_BAD_PASS, WIFI_SET
 // open network, otherwise 8-63 characters (WPA2). Lengths are in bytes.
 // Until something is saved here, the STA_* values from secrets.h are used.
 WifiSetResult wifiSetSta(const char* ssid, const char* pass);
+
+// If the STA could not connect within STA_GIVE_UP_MS it is switched off so the AP
+// stays reachable (NetStatus::staGaveUp). This tries the saved network again.
+void wifiRetrySta();

@@ -41,6 +41,7 @@ struct NetStatus {
     bool apUp  = false;
     bool staUp = false;
     bool staEnabled = false;  // an STA SSID is configured
+    bool staGaveUp  = false;  // not connected within STA_GIVE_UP_MS: STA off until a retry
     char apIp[16]  = "";
     char staIp[16] = "";
     char staSsid[33] = "";

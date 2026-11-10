@@ -17,6 +17,7 @@ struct StaConfig {
 static portMUX_TYPE s_mux = portMUX_INITIALIZER_UNLOCKED;
 static StaConfig s_pending;
 static bool s_hasPending = false;
+static bool s_retry      = false;  // web page asked to try the saved STA network again
 
 static void loadSta(StaConfig& c) {
     Preferences p;
@@ -63,16 +64,33 @@ WifiSetResult wifiSetSta(const char* ssid, const char* pass) {
     return WIFI_SET_OK;
 }
 
+void wifiRetrySta() {
+    portENTER_CRITICAL(&s_mux);
+    s_retry = true;
+    portEXIT_CRITICAL(&s_mux);
+}
+
 static void startSta(const StaConfig& c) {
     if (c.ssid[0]) {
         WiFi.mode(WIFI_AP_STA);
         WiFi.setAutoReconnect(true);
         WiFi.begin(c.ssid, c.pass[0] ? c.pass : nullptr);
-        Serial.printf("WIFI: STA connecting to \"%s\"\n", c.ssid);
+        Serial.printf("WIFI: STA connecting to \"%s\" (gives up after %d s)\n", c.ssid, STA_GIVE_UP_MS / 1000);
     } else {
         WiFi.mode(WIFI_AP);
         Serial.println("WIFI: STA disabled (SoftAP only)");
     }
+}
+
+// While the STA searches for a network it keeps scanning other channels, and the
+// single radio is then mostly away from the AP's channel: AP clients cannot join.
+// So after STA_GIVE_UP_MS without a connection the STA is switched off (AP only)
+// until the web page asks for a retry or new settings are saved.
+static void giveUpSta(const StaConfig& c) {
+    WiFi.disconnect();
+    WiFi.mode(WIFI_AP);
+    Serial.printf("WIFI: STA \"%s\" not connected for %d s: gave up, SoftAP only (retry from the web page)\n",
+                  c.ssid, STA_GIVE_UP_MS / 1000);
 }
 
 static void wifiTask(void*) {
@@ -83,23 +101,28 @@ static void wifiTask(void*) {
     WiFi.mode(cur.ssid[0] ? WIFI_AP_STA : WIFI_AP);
     const bool apUp = WiFi.softAP(AP_SSID, AP_PASS);
     startSta(cur);
-    uint32_t lastAttempt = millis();
+    uint32_t lastAttempt = millis();  // last connected moment or last (re)connect kick
+    uint32_t lastUpMs    = millis();  // last connected moment or start of the current attempt
+    bool gaveUp          = false;
 
     for (;;) {
         StaConfig next;
-        bool changed = false;
+        bool changed = false, retry = false;
         portENTER_CRITICAL(&s_mux);
         if (s_hasPending) {
             next         = s_pending;
             s_hasPending = false;
             changed      = true;
         }
+        retry   = s_retry;
+        s_retry = false;
         portEXIT_CRITICAL(&s_mux);
-        if (changed) {
-            if (cur.ssid[0]) WiFi.disconnect();  // drop the old network; keeps the AP up
-            cur = next;
+        if (changed || (retry && cur.ssid[0])) {
+            if (cur.ssid[0] && !gaveUp) WiFi.disconnect();  // drop the old network; keeps the AP up
+            if (changed) cur = next;
             startSta(cur);
-            lastAttempt = millis();
+            gaveUp      = false;
+            lastAttempt = lastUpMs = millis();
         }
 
         const bool useSta = cur.ssid[0] != '\0';
@@ -109,21 +132,26 @@ static void wifiTask(void*) {
         n.clients    = WiFi.softAPgetStationNum();
         n.staEnabled = useSta;
         strlcpy(n.staSsid, cur.ssid, sizeof(n.staSsid));
-        if (useSta) {
+        if (useSta && !gaveUp) {
+            const uint32_t now = millis();
             n.staUp = WiFi.status() == WL_CONNECTED;
             if (n.staUp) {
                 strlcpy(n.staIp, WiFi.localIP().toString().c_str(), sizeof(n.staIp));
-                lastAttempt = millis();
-            } else if (millis() - lastAttempt >= STA_RETRY_MS) {
+                lastAttempt = lastUpMs = now;
+            } else if (now - lastUpMs >= STA_GIVE_UP_MS) {
+                giveUpSta(cur);
+                gaveUp = true;
+            } else if (now - lastAttempt >= STA_RETRY_MS) {
                 // Auto-reconnect normally handles this; kick it only if it has been stuck,
                 // so an in-progress connection attempt is not aborted.
                 WiFi.reconnect();
-                lastAttempt = millis();
+                lastAttempt = now;
             }
         }
+        n.staGaveUp = useSta && gaveUp;
         stateSetNet(n);
         // Short period so a new setting from the web page is applied promptly.
-        vTaskDelay(pdMS_TO_TICKS(changed ? 100 : 500));
+        vTaskDelay(pdMS_TO_TICKS(changed || retry ? 100 : 500));
     }
 }
 

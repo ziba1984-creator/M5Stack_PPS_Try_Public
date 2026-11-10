@@ -17,6 +17,9 @@
 // server would then never start. Catch it at build time instead.
 static_assert(sizeof(AP_PASS) - 1 >= 8 && sizeof(AP_PASS) - 1 <= 63, "AP_PASS must be 8-63 characters (WPA2)");
 #define STA_RETRY_MS 15000
+// While the STA searches for its network the AP is barely reachable (one radio,
+// channel scanning). Give up after this long without a connection; retry from the web.
+#define STA_GIVE_UP_MS 30000
 
 // PPS limits (clamped in pps_ctrl)
 #define PPS_I2C_FREQ   100000U  // 100 kHz for noise margin (fan motor on the same bus)

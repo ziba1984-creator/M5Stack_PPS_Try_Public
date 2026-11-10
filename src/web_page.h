@@ -37,7 +37,10 @@ input{width:6em;font-size:1.1em}button{font-size:1.1em;padding:.4em .8em;margin:
 <p>SSID <input id="ssid" maxlength="32" autocomplete="off" style="width:12em"></p>
 <p>Password <input id="pass" type="password" maxlength="63" autocomplete="new-password" style="width:12em"></p>
 <p><button onclick="setWifi(ssid.value,pass.value)">Save &amp; connect</button>
-<button onclick="setWifi('','')">Disable STA</button></p>
+<button onclick="setWifi('','')">Disable STA</button>
+<button onclick="retryWifi()">Retry STA</button></p>
+<p><small>If the saved network is not found within 30 s, the STA gives up so this AP stays usable.
+Use "Retry STA" to search again with the saved settings.</small></p>
 <p><small>Password: re-enter every time (empty = open network). It is never shown again.
 The AP may drop for a moment when the STA connects (it follows the router's channel).</small></p>
 <div id="wmsg"></div>
@@ -57,6 +60,12 @@ async function setWifi(ss,pw){
     if(r.ok)$('pass').value='';
   }catch(e){$('wmsg').textContent='Error: request failed (result unknown)';}
 }
+async function retryWifi(){
+  try{
+    const r=await fetch('/api/wifi/retry',{method:'POST',headers:{'X-PPS':'1'}});
+    $('wmsg').textContent=(r.ok?'':'Error '+r.status+': ')+await r.text();
+  }catch(e){$('wmsg').textContent='Error: request failed (result unknown)';}
+}
 async function poll(){
   try{
     const s=await (await fetch('/api/status')).json();
@@ -73,7 +82,8 @@ async function poll(){
     $('fan').textContent=s.fan<0?'not found':s.fan+' %';
     $('batt').textContent=(s.batt_level<0?'--':s.batt_level+'%')+' '+s.batt_mv+'mV'+(s.charging?' (charging)':'');
     $('ap').textContent=s.ap_ip+' ('+s.ap_clients+' clients)';
-    $('sta').textContent=!s.sta_enabled?'disabled':(s.sta_ssid+': '+(s.sta_up?s.sta_ip:'connecting...'));
+    $('sta').textContent=s.sta_state==='disabled'?'disabled':(s.sta_ssid+': '+
+      ({connected:s.sta_ip,connecting:'connecting...',gave_up:'not found (gave up, use Retry STA)'}[s.sta_state]||s.sta_state));
     if($('err').textContent==='Connection lost')$('err').textContent='';
   }catch(e){$('err').textContent='Connection lost';}
   setTimeout(poll,500);

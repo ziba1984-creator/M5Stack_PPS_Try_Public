@@ -61,6 +61,8 @@ void draw(const PpsStatus& p, const BatteryStatus& b, const NetStatus& n) {
     // instead: that is the one needed to open the web page from the home network.
     if (n.staUp) {
         snprintf(buf, sizeof(buf), "STA %s", n.staIp);
+    } else if (n.staGaveUp) {
+        snprintf(buf, sizeof(buf), "STA x AP %s(%d)", n.apIp, n.clients);  // retry from the web page
     } else if (n.staEnabled) {
         snprintf(buf, sizeof(buf), "STA.. AP %s(%d)", n.apIp, n.clients);
     } else {
