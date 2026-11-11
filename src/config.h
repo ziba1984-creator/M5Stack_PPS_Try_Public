@@ -60,7 +60,8 @@ static_assert(sizeof(AP_PASS) - 1 >= 8 && sizeof(AP_PASS) - 1 <= 63, "AP_PASS mu
 // Temperature bands (PPS module temperature, deg C), shared by fan and LEDs
 #define TEMP_WARM      40.0f  // LED yellow
 #define TEMP_HOT       45.0f  // LED red
-#define TEMP_VERY_HOT  50.0f  // LED red blinking (fan already at full speed)
+#define TEMP_VERY_HOT  55.0f  // LED red blinking. 52 W continuous settles around 52-53 C (fan at full
+                              // speed), so normal full-load operation does not blink.
 // Thermal stop: TEMP_CRITICAL_READS consecutive valid reads (one per PPS_POLL_MS) at or
 // above TEMP_CRITICAL turn the output OFF and latch it. The output is never turned back
 // on automatically; output ON is refused until the temperature is below TEMP_RESUME,
@@ -86,7 +87,7 @@ static_assert(sizeof(AP_PASS) - 1 >= 8 && sizeof(AP_PASS) - 1 <= 63, "AP_PASS mu
 #define LED_PER_SIDE   5
 #define LED_BRIGHTNESS 40      // 0-255; keep low to save battery
 #define LED_T_LOW      25.0f   // 1 LED lit at or below this temperature
-#define LED_T_HIGH     50.0f   // all 5 lit at or above this temperature (= TEMP_VERY_HOT)
+#define LED_T_HIGH     50.0f   // all 5 lit at or above this temperature (bar full, blinking from TEMP_VERY_HOT)
 #define THERMAL_PERIOD_MS 500  // also the LED blink half-period
 
 // Tasks: name, stack(bytes), priority, core
