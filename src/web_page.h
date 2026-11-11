@@ -73,12 +73,15 @@ async function poll(){
     $('en').textContent=s.halted?(s.output_unknown?'HALTED (OFF NOT confirmed)':'HALTED (OFF)'):
       !s.connected?(s.output_unknown?'PPS lost (output UNKNOWN)':'PPS not found'):
       (!s.valid?(s.verifying?'CHECKING...':(s.output_unknown?'UNKNOWN (output may be ON)':'UNKNOWN (stale)')):
-      (s.enabled?'ON':'OFF'));
+      (s.enabled?'ON':'OFF'))+
+      (s.thermal_stop?' / THERMAL STOP ('+s.thermal_stop_temp.toFixed(0)+' C): '+
+        (s.temp<s.temp_resume?'cooled, Output ON to resume':'ON refused until below '+s.temp_resume.toFixed(0)+' C'):'');
     $('mode').textContent=s.mode<=1?'CV':'CC';
     $('vout').textContent=s.vout.toFixed(2)+' V';
     $('iout').textContent=s.iout.toFixed(3)+' A';
     $('vin').textContent=s.vin.toFixed(2)+' V';
     $('temp').textContent=s.temp.toFixed(1)+' C';
+    $('en').style.color=s.thermal_stop?'#c00':'';
     $('set').textContent=s.vset.toFixed(2)+' V / '+s.iset.toFixed(2)+' A';
     $('fan').textContent=s.fan<0?'not found':s.fan+' %';
     $('batt').textContent=(s.batt_level<0?'--':s.batt_level+'%')+' '+s.batt_mv+'mV'+(s.charging?' (charging)':'');

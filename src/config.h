@@ -58,15 +58,22 @@ static_assert(sizeof(AP_PASS) - 1 >= 8 && sizeof(AP_PASS) - 1 <= 63, "AP_PASS mu
 #define PPS_TEMP_MAX_STEP  10.0f   // larger jump between consecutive valid reads is rejected
 
 // Temperature bands (PPS module temperature, deg C), shared by fan and LEDs
-#define TEMP_WARM      35.0f  // LED yellow
-#define TEMP_HOT       40.0f  // LED red
-#define TEMP_CRITICAL  45.0f  // LED red blinking
+#define TEMP_WARM      40.0f  // LED yellow
+#define TEMP_HOT       45.0f  // LED red
+#define TEMP_VERY_HOT  50.0f  // LED red blinking (fan already at full speed)
+// Thermal stop: TEMP_CRITICAL_READS consecutive valid reads (one per PPS_POLL_MS) at or
+// above TEMP_CRITICAL turn the output OFF and latch it. The output is never turned back
+// on automatically; output ON is refused until the temperature is below TEMP_RESUME,
+// and the first ON accepted after that clears the latch.
+#define TEMP_CRITICAL       60.0f  // output OFF (thermal stop), LEDs red/white blinking
+#define TEMP_CRITICAL_READS 3
+#define TEMP_RESUME         50.0f
 
 // Fan Module v1.1: off below FAN_T_ON (stays on down to FAN_T_OFF), FAN_DUTY_MIN..100 % up to FAN_T_FULL
 #define FAN_I2C_FREQ     100000U
-#define FAN_T_ON         38.0f
-#define FAN_T_OFF        35.0f
-#define FAN_T_FULL       42.0f  // full speed before TEMP_CRITICAL (45) is reached
+#define FAN_T_ON         43.0f
+#define FAN_T_OFF        40.0f
+#define FAN_T_FULL       47.0f  // full speed before TEMP_VERY_HOT (50) is reached
 #define FAN_DUTY_MIN     30
 #define FAN_DUTY_UNKNOWN 50     // while the PPS temperature read is stale
 #define FAN_PROBE_MS     5000   // retry interval when the fan module is not found
@@ -79,7 +86,7 @@ static_assert(sizeof(AP_PASS) - 1 >= 8 && sizeof(AP_PASS) - 1 <= 63, "AP_PASS mu
 #define LED_PER_SIDE   5
 #define LED_BRIGHTNESS 40      // 0-255; keep low to save battery
 #define LED_T_LOW      25.0f   // 1 LED lit at or below this temperature
-#define LED_T_HIGH     45.0f   // all 5 lit at or above this temperature (= TEMP_CRITICAL)
+#define LED_T_HIGH     50.0f   // all 5 lit at or above this temperature (= TEMP_VERY_HOT)
 #define THERMAL_PERIOD_MS 500  // also the LED blink half-period
 
 // Tasks: name, stack(bytes), priority, core

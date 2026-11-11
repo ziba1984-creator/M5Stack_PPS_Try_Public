@@ -122,8 +122,18 @@ void draw(const PpsStatus& p, const BatteryStatus& b, const NetStatus& n) {
         canvas.setTextDatum(top_center);
         canvas.setTextColor(ORANGE, BLACK);
         canvas.drawString("STALE", 160, 4, &fonts::Font2);
+    } else if (p.thermalStop && !p.enabled && p.temp >= TEMP_RESUME) {
+        // ON is refused by pps_ctrl until the PPS has cooled down.
+        snprintf(buf, sizeof(buf), "TOO HOT >%.0fC", TEMP_RESUME);
+        drawButton(BTN_POWER, buf, MAGENTA);
     } else {
         drawButton(BTN_POWER, p.enabled ? "OUTPUT ON" : "OUTPUT OFF", p.enabled ? RED : 0x03E0);
+    }
+    if (p.thermalStop && p.valid) {
+        snprintf(buf, sizeof(buf), "THERMAL STOP %.0fC", p.thermalStopTemp);
+        canvas.setTextDatum(top_center);
+        canvas.setTextColor(MAGENTA, BLACK);
+        canvas.drawString(buf, 150, 4, &fonts::Font2);
     }
     canvas.pushSprite(0, 0);
 }

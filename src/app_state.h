@@ -20,6 +20,10 @@ struct PpsStatus {
     // supply, so a CoreS3-only reboot can leave its output ON.
     bool outputUnknown = true;
     bool halted        = false;  // systemFatal ran: no further commands are applied
+    // Thermal stop latched (TEMP_CRITICAL reached): output was turned OFF and ON is
+    // refused until below TEMP_RESUME. Survives reconnects; cleared by the next accepted ON.
+    bool thermalStop     = false;
+    float thermalStopTemp = 0;  // temperature that tripped it
     bool enabled   = false;
     uint8_t mode   = 0;  // <=1: CV, otherwise CC
     float vin = 0, vout = 0, iout = 0, temp = 0;
@@ -61,6 +65,8 @@ enum PpsResult : uint8_t {
     PPS_ERR_DISCONNECTED,  // dropped because the PPS was (re)connecting; nothing was applied
     PPS_ERR_STALE,         // status is stale: only output OFF is allowed (OFF, if requested, was applied)
     PPS_ERR_SUPERSEDED,    // an output-OFF was posted after this output-ON: nothing was applied
+    PPS_ERR_THERMAL,       // output-ON refused: thermal stop latched and not cooled below TEMP_RESUME
+                           // (or temperature at/above TEMP_CRITICAL): nothing was applied
 };
 
 struct PpsCmd {

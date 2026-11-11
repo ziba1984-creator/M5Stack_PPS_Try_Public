@@ -4,15 +4,18 @@
 //   L = make every PPS I2C access fail (simulated link loss)   R = restore
 //   N = post "output ON"   O = post "output OFF"   F = systemFatal from the UI task
 //   V / v = setpoint +0.1 V / -0.1 V (relative)
+//   T / t = add +5 / -5 C to the temperature read from the PPS (thermal stop test)   0 = no offset
 // The test build boots with PPS I2C failing (boot-time "output unknown" path); send R.
 // Normal builds get no-op inline stubs.
 
 #ifdef PPS_FAULT_INJECTION
 bool faultPpsI2c();
 bool faultFatalRequested();
+float faultTempOffset();
 bool faultTaskStart();
 #else
 inline bool faultPpsI2c() { return false; }
 inline bool faultFatalRequested() { return false; }
+inline float faultTempOffset() { return 0.0f; }
 inline bool faultTaskStart() { return true; }
 #endif

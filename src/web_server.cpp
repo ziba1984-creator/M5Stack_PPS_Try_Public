@@ -40,14 +40,15 @@ static void handleStatus() {
     NetStatus n     = stateGetNet();
     char ssid[33 * 6 + 1];
     jsonEscape(n.staSsid, ssid, sizeof(ssid));
-    char buf[768];
+    char buf[1024];
     snprintf(buf, sizeof(buf),
              "{\"connected\":%s,\"valid\":%s,\"verifying\":%s,\"output_unknown\":%s,\"halted\":%s,\"enabled\":%s,"
              "\"mode\":%u,\"vin\":%.3f,\"vout\":%.3f,"
              "\"iout\":%.4f,\"temp\":%.1f,\"vset\":%.3f,\"iset\":%.3f,"
              "\"batt_level\":%d,\"batt_mv\":%d,\"charging\":%s,\"fan\":%d,"
              "\"ap_ip\":\"%s\",\"ap_clients\":%d,\"sta_enabled\":%s,\"sta_ssid\":\"%s\",\"sta_up\":%s,\"sta_ip\":\"%s\","
-             "\"sta_state\":\"%s\",\"nat\":%s}",
+             "\"sta_state\":\"%s\",\"nat\":%s,"
+             "\"thermal_stop\":%s,\"thermal_stop_temp\":%.1f,\"temp_resume\":%.1f,\"temp_critical\":%.1f}",
              p.connected ? "true" : "false", p.valid ? "true" : "false", p.verifying ? "true" : "false",
              p.outputUnknown ? "true" : "false", p.halted ? "true" : "false",
              p.enabled ? "true" : "false", p.mode, p.vin, p.vout,
@@ -56,7 +57,8 @@ static void handleStatus() {
              n.apIp, n.clients, n.staEnabled ? "true" : "false", ssid, n.staUp ? "true" : "false",
              n.staUp ? n.staIp : "",
              !n.staEnabled ? "disabled" : n.staUp ? "connected" : n.staGaveUp ? "gave_up" : "connecting",
-             n.natOn ? "true" : "false");
+             n.natOn ? "true" : "false", p.thermalStop ? "true" : "false", p.thermalStopTemp, TEMP_RESUME,
+             TEMP_CRITICAL);
     server.send(200, "application/json", buf);
 }
 
@@ -131,6 +133,12 @@ static void handleSet() {
         case PPS_ERR_SUPERSEDED:
             server.send(409, "text/plain", "superseded: a later output OFF was requested (not applied)");
             return;
+        case PPS_ERR_THERMAL: {
+            char msg[96];
+            snprintf(msg, sizeof(msg), "too hot: output ON refused until below %.0f C (not applied)", TEMP_RESUME);
+            server.send(409, "text/plain", msg);
+            return;
+        }
     }
     server.send(500, "text/plain", "internal error");
 }

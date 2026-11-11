@@ -40,6 +40,10 @@ static void showLeds(const PpsStatus& p, bool blinkOn) {
         // orange blink: link lost (output may be ON) or temperature stale
         color = blinkOn ? s_leds.Color(255, 96, 0) : 0;  // orange blink: temperature unknown
         lit   = LED_PER_SIDE;
+    } else if (p.thermalStop) {
+        // red/white alternating on all LEDs: output stopped by over-temperature
+        color = blinkOn ? s_leds.Color(255, 0, 0) : s_leds.Color(255, 255, 255);
+        lit   = LED_PER_SIDE;
     } else {
         float k = (p.temp - LED_T_LOW) / (LED_T_HIGH - LED_T_LOW);
         k       = k < 0 ? 0 : (k > 1 ? 1 : k);
@@ -47,7 +51,7 @@ static void showLeds(const PpsStatus& p, bool blinkOn) {
         if (p.temp >= TEMP_HOT) color = s_leds.Color(255, 0, 0);
         else if (p.temp >= TEMP_WARM) color = s_leds.Color(255, 160, 0);
         else color = s_leds.Color(0, 255, 0);
-        if (p.temp >= TEMP_CRITICAL && !blinkOn) color = 0;
+        if (p.temp >= TEMP_VERY_HOT && !blinkOn) color = 0;
     }
     for (int i = 0; i < LED_PER_SIDE; ++i) {
         const uint32_t c = i < lit ? color : 0;

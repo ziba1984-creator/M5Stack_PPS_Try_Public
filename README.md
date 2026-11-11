@@ -5,6 +5,7 @@ M5Stack CoreS3 (SE) で M5Stack PPS モジュールを制御する PlatformIO �
 - 画面タッチと Web (SoftAP) から電圧・電流・出力 ON/OFF を操作
 - Fan Module v1.1 を PPS 温度で自動制御
 - M5GO Battery Bottom3 の RGB LED で温度状態を表示
+- PPS 温度が 60℃ に達すると出力を OFF にして固定（50℃ 未満に下がるまで ON 不可。自動では再開しない）
 
 ## セットアップ
 

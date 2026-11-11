@@ -156,10 +156,32 @@ static void markFailed(PpsStatus& st, bool outputMayBeOn) {
     if (outputMayBeOn) st.outputUnknown = true;
 }
 
+// Thermal stop latch. Owned by the PPS task only (set by thermalCheck, cleared by an
+// accepted output ON), so it needs no locking. Kept outside PpsStatus so a reconnect,
+// which resets the snapshot, cannot clear it.
+static bool s_thermalStop       = false;
+static float s_thermalStopTemp  = 0;
+static uint8_t s_criticalReads  = 0;
+
+// Gate for output ON. A stale temperature is left to the STALE check in applySet.
+static PpsResult thermalGateOn(const PpsStatus& st) {
+    if (!trusted(st)) return PPS_OK;
+    if (st.temp >= TEMP_CRITICAL) return PPS_ERR_THERMAL;
+    if (!s_thermalStop) return PPS_OK;
+    if (st.temp >= TEMP_RESUME) return PPS_ERR_THERMAL;
+    s_thermalStop = false;
+    Serial.printf("PPS: thermal stop cleared by output ON (%.1f C)\n", st.temp);
+    return PPS_OK;
+}
+
 static PpsResult applySet(const PpsCmd& c, PpsStatus& st) {
     // An OFF posted after this ON jumped ahead of it in the queue: running the ON now
     // would undo that OFF. Reject the whole command before writing anything.
     if (c.hasEn && c.en && c.offSeq != ppsOffSeq()) return PPS_ERR_SUPERSEDED;
+    if (c.hasEn && c.en) {
+        const PpsResult t = thermalGateOn(st);
+        if (t != PPS_OK) return t;
+    }
     // OFF first, so a failing setpoint write can never delay or skip it.
     if (c.hasEn && !c.en) {
         if (!outputOff()) {
@@ -252,6 +274,7 @@ static bool readStatus(PpsStatus& s) {
              readU8(REG_ENABLE, en);
     }
     if (!ok) return false;
+    r.temp += faultTempOffset();  // test builds only (always 0 otherwise)
     if (!plausible(r, s)) {
         Serial.printf("PPS: implausible status rejected (vin %.2f vout %.2f iout %.3f temp %.1f vset %.2f iset %.2f)\n",
                       r.vin, r.vout, r.iout, r.temp, r.vset, r.iset);
@@ -263,6 +286,42 @@ static bool readStatus(PpsStatus& s) {
     r.outputUnknown = false;  // the output state was just read
     s = r;
     return true;
+}
+
+// Called after every good status read. Trips the thermal stop after
+// TEMP_CRITICAL_READS consecutive reads at/above TEMP_CRITICAL, and while it is latched
+// keeps the output OFF (this also retries an OFF that could not be confirmed).
+static void thermalCheck(PpsStatus& st) {
+    if (st.temp >= TEMP_CRITICAL) {
+        if (s_criticalReads < 255) ++s_criticalReads;
+    } else {
+        s_criticalReads = 0;
+    }
+    if (!s_thermalStop && s_criticalReads >= TEMP_CRITICAL_READS) {
+        s_thermalStop     = true;
+        s_thermalStopTemp = st.temp;
+        Serial.printf("PPS: THERMAL STOP at %.1f C: output OFF, ON refused until below %.0f C\n", st.temp,
+                      TEMP_RESUME);
+    }
+    if (!s_thermalStop || !st.enabled) return;
+    bool off;
+    {
+        I2cLock lock;
+        off = !s_halted && outputOff();  // after a fatal stop, ppsShutdown owns the OFF
+    }
+    if (off) {
+        st.enabled = false;  // confirmed by read-back
+    } else if (!s_halted) {
+        markFailed(st, true);
+        Serial.println("PPS: thermal stop: output OFF not confirmed, retrying");
+    }
+}
+
+// Every publish from the PPS task carries the thermal latch.
+static void publish(PpsStatus& st) {
+    st.thermalStop     = s_thermalStop;
+    st.thermalStopTemp = s_thermalStopTemp;
+    stateSetPps(st);
 }
 
 static void haltedLoop() {
@@ -294,7 +353,7 @@ static void ppsTask(void*) {
             st.connected             = conn == CONN_OK;
             st.outputUnknown         = unknown && !st.connected;
             logConnectAttempt(connLog, conn, st.outputUnknown);
-            stateSetPps(st);
+            publish(st);
             if (!st.connected) {
                 vTaskDelay(pdMS_TO_TICKS(1000));
                 continue;
@@ -311,7 +370,7 @@ static void ppsTask(void*) {
             const TickType_t now = xTaskGetTickCount();
             if ((int32_t)(deadline - now) <= 0 || !ppsWaitCmd(cmd, deadline - now)) break;
             const PpsResult r = applyCmd(cmd, st);
-            stateSetPps(st);  // publish verifying/stale/OFF right away, before the next read
+            publish(st);  // publish verifying/stale/OFF right away, before the next read
             if (cmd.id) ppsPostReply(cmd.id, r);
             if (r != PPS_OK) Serial.printf("PPS: command type %u not applied (result %u)\n", cmd.type, r);
         }
@@ -327,6 +386,7 @@ static void ppsTask(void*) {
         }
         if (readOk) {
             lastGoodRead = xTaskGetTickCount();
+            thermalCheck(st);
         } else {
             const uint32_t sinceMs = (xTaskGetTickCount() - lastGoodRead) * portTICK_PERIOD_MS;
             Serial.printf("PPS: status read failed (%lu ms since last good read)\n", (unsigned long)sinceMs);
@@ -340,7 +400,7 @@ static void ppsTask(void*) {
                 st.outputUnknown = true;
             }
         }
-        stateSetPps(st);
+        publish(st);
     }
 }
 
